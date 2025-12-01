@@ -18,8 +18,8 @@
  * - Comprehensive synthesis of all findings
  * 
  * ## Models
- * - **sonar** - Fast web search (default for initial queries)
- * - **sonar-pro** - Deeper analysis (used for follow-ups)
+ * - **perplexity/sonar** - Fast web search (default for initial queries)
+ * - **perplexity/sonar-pro** - Deeper analysis (used for follow-ups)
  */
 
 import { spawn } from 'child_process';
@@ -96,14 +96,14 @@ Return ONLY a JSON array of query strings, no explanation:
 `;
 
   try {
-    const response = await fetch('https://api.perplexity.ai/chat/completions', {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'sonar',
+        model: 'perplexity/sonar',
         messages: [{
           role: 'system',
           content: 'You are a research query decomposition expert. Return only valid JSON arrays.'
@@ -144,7 +144,7 @@ Return ONLY a JSON array of query strings, no explanation:
 
 // Function to execute a single search query
 async function executeSearch(query: string, model: string = 'sonar'): Promise<any> {
-  const response = await fetch('https://api.perplexity.ai/chat/completions', {
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,

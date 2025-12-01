@@ -2,9 +2,8 @@
 
 # Check status of PAI Voice Server
 
-SERVICE_NAME="com.pai.voice-server"
-PLIST_PATH="$HOME/Library/LaunchAgents/${SERVICE_NAME}.plist"
-LOG_PATH="$HOME/Library/Logs/pai-voice-server.log"
+SERVICE_NAME="pai-voice-server"
+LOG_DIR="$HOME/.local/state/pai-voice-server"
 ENV_FILE="$HOME/.env"
 
 # Colors
@@ -19,17 +18,30 @@ echo -e "${BLUE}     PAI Voice Server Status${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo
 
-# Check LaunchAgent
+# Check systemd service
 echo -e "${BLUE}Service Status:${NC}"
-if launchctl list | grep -q "$SERVICE_NAME" 2>/dev/null; then
-    PID=$(launchctl list | grep "$SERVICE_NAME" | awk '{print $1}')
-    if [ "$PID" != "-" ]; then
-        echo -e "  ${GREEN}✓ Service is loaded (PID: $PID)${NC}"
-    else
-        echo -e "  ${YELLOW}⚠ Service is loaded but not running${NC}"
+if systemctl --user is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+    echo -e "  ${GREEN}✓ Service is running${NC}"
+
+    # Get PID from systemd
+    PID=$(systemctl --user show -p MainPID --value "$SERVICE_NAME" 2>/dev/null)
+    if [ -n "$PID" ] && [ "$PID" != "0" ]; then
+        echo -e "  ${GREEN}  PID: $PID${NC}"
+    fi
+
+    # Get uptime
+    SINCE=$(systemctl --user show -p ActiveEnterTimestamp --value "$SERVICE_NAME" 2>/dev/null)
+    if [ -n "$SINCE" ]; then
+        echo "  Started: $SINCE"
     fi
 else
-    echo -e "  ${RED}✗ Service is not loaded${NC}"
+    if systemctl --user is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
+        echo -e "  ${YELLOW}⚠ Service is installed but not running${NC}"
+        echo "  Start it with: ./start.sh"
+    else
+        echo -e "  ${RED}✗ Service is not installed${NC}"
+        echo "  Install it with: ./install.sh"
+    fi
 fi
 
 # Check if server is responding
@@ -37,10 +49,13 @@ echo
 echo -e "${BLUE}Server Status:${NC}"
 if curl -s -f -X GET http://localhost:8888/health > /dev/null 2>&1; then
     echo -e "  ${GREEN}✓ Server is responding on port 8888${NC}"
-    
+
     # Get health info
-    HEALTH=$(curl -s http://localhost:8888/health)
-    echo "  Response: $HEALTH"
+    HEALTH=$(curl -s http://localhost:8888/health 2>/dev/null)
+    if [ -n "$HEALTH" ]; then
+        echo "  Health Response:"
+        echo "$HEALTH" | jq '.' 2>/dev/null || echo "  $HEALTH"
+    fi
 else
     echo -e "  ${RED}✗ Server is not responding${NC}"
 fi
@@ -48,10 +63,19 @@ fi
 # Check port binding
 echo
 echo -e "${BLUE}Port Status:${NC}"
-if lsof -i :8888 > /dev/null 2>&1; then
+if ss -ltn | grep -q ':8888 ' 2>/dev/null; then
+    echo -e "  ${GREEN}✓ Port 8888 is in use${NC}"
+    PROCESS=$(ss -ltnp 2>/dev/null | grep ':8888 ')
+    if [ -n "$PROCESS" ]; then
+        echo "  $PROCESS"
+    fi
+elif lsof -i :8888 > /dev/null 2>&1; then
+    # Fallback to lsof
     PROCESS=$(lsof -i :8888 | grep LISTEN | head -1)
     echo -e "  ${GREEN}✓ Port 8888 is in use${NC}"
-    echo "  $PROCESS" | awk '{print "  Process: " $1 " (PID: " $2 ")"}'
+    if [ -n "$PROCESS" ]; then
+        echo "  $PROCESS" | awk '{print "  Process: " $1 " (PID: " $2 ")"}'
+    fi
 else
     echo -e "  ${YELLOW}⚠ Port 8888 is not in use${NC}"
 fi
@@ -68,30 +92,54 @@ if [ -f "$ENV_FILE" ] && grep -q "ELEVENLABS_API_KEY=" "$ENV_FILE"; then
             echo "  Voice ID: $VOICE_ID"
         fi
     else
-        echo -e "  ${YELLOW}⚠ Using macOS 'say' (no API key)${NC}"
+        echo -e "  ${YELLOW}⚠ ElevenLabs not configured${NC}"
     fi
 else
-    echo -e "  ${YELLOW}⚠ Using macOS 'say' (no configuration)${NC}"
+    echo -e "  ${YELLOW}⚠ ElevenLabs not configured${NC}"
 fi
 
-# Check logs
+# Check audio player
 echo
-echo -e "${BLUE}Recent Logs:${NC}"
-if [ -f "$LOG_PATH" ]; then
-    echo "  Log file: $LOG_PATH"
-    echo "  Last 5 lines:"
-    tail -5 "$LOG_PATH" | while IFS= read -r line; do
-        echo "    $line"
-    done
+echo -e "${BLUE}Audio System:${NC}"
+if command -v mpg123 &> /dev/null; then
+    echo -e "  ${GREEN}✓ mpg123 installed${NC}"
+elif command -v ffplay &> /dev/null; then
+    echo -e "  ${GREEN}✓ ffplay (ffmpeg) installed${NC}"
 else
-    echo -e "  ${YELLOW}⚠ No log file found${NC}"
+    echo -e "  ${YELLOW}⚠ No audio player found${NC}"
+    echo "  Install: sudo apt-get install mpg123"
 fi
+
+# Check notification system
+if command -v notify-send &> /dev/null; then
+    echo -e "  ${GREEN}✓ notify-send installed${NC}"
+else
+    echo -e "  ${YELLOW}⚠ notify-send not found${NC}"
+    echo "  Install: sudo apt-get install libnotify-bin"
+fi
+
+# Check recent logs
+echo
+echo -e "${BLUE}Recent Logs (last 5 lines):${NC}"
+if [ -d "$LOG_DIR" ]; then
+    echo "  Log directory: $LOG_DIR"
+    if [ -f "$LOG_DIR/voice-server.log" ]; then
+        tail -5 "$LOG_DIR/voice-server.log" 2>/dev/null | while IFS= read -r line; do
+            echo "    $line"
+        done
+    fi
+else
+    echo -e "  ${YELLOW}⚠ Log directory not found${NC}"
+fi
+
+echo
+echo -e "  View full logs: journalctl --user -u $SERVICE_NAME -n 50"
 
 # Show commands
 echo
 echo -e "${BLUE}Available Commands:${NC}"
-echo "  • Start:     ./start.sh"
-echo "  • Stop:      ./stop.sh"
-echo "  • Restart:   ./restart.sh"
-echo "  • Logs:      tail -f $LOG_PATH"
+echo "  • Start:     ./start.sh    or  systemctl --user start $SERVICE_NAME"
+echo "  • Stop:      ./stop.sh     or  systemctl --user stop $SERVICE_NAME"
+echo "  • Restart:   ./restart.sh  or  systemctl --user restart $SERVICE_NAME"
+echo "  • Logs:      journalctl --user -u $SERVICE_NAME -f"
 echo "  • Test:      curl -X POST http://localhost:8888/notify -H 'Content-Type: application/json' -d '{\"message\":\"Test\"}'"

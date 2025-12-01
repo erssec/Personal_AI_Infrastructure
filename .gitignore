@@ -61,3 +61,8 @@ out/
 private/
 secrets/
 credentials/
+.claude/.credentials.json
+.claude/debug/latest
+.claude/debug/3a1718b5-f969-4459-b8ab-2ba364440d0b.txt
+.claude/debug/088a55ff-6f43-449b-9bea-72986d4b3bda.txt
+.claude/debug/053cb13a-52be-44c7-b704-40bd34d79a00.txt

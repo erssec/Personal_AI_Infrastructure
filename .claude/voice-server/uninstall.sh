@@ -2,9 +2,10 @@
 
 # Uninstall PAI Voice Server
 
-SERVICE_NAME="com.pai.voice-server"
-PLIST_PATH="$HOME/Library/LaunchAgents/${SERVICE_NAME}.plist"
-LOG_PATH="$HOME/Library/Logs/pai-voice-server.log"
+SERVICE_NAME="pai-voice-server"
+SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
+SERVICE_PATH="${SYSTEMD_USER_DIR}/${SERVICE_NAME}.service"
+LOG_DIR="$HOME/.local/state/pai-voice-server"
 
 # Colors
 RED='\033[0;31m'
@@ -21,7 +22,8 @@ echo
 # Confirm uninstall
 echo -e "${YELLOW}This will:${NC}"
 echo "  • Stop the voice server"
-echo "  • Remove the LaunchAgent"
+echo "  • Disable the systemd service"
+echo "  • Remove the systemd service file"
 echo "  • Keep your server files and configuration"
 echo
 read -p "Are you sure you want to uninstall? (y/n): " -n 1 -r
@@ -35,24 +37,42 @@ fi
 
 # Stop the service if running
 echo -e "${YELLOW}▶ Stopping voice server...${NC}"
-if launchctl list | grep -q "$SERVICE_NAME" 2>/dev/null; then
-    launchctl unload "$PLIST_PATH" 2>/dev/null
+if systemctl --user is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+    systemctl --user stop "$SERVICE_NAME" 2>&1
     echo -e "${GREEN}✓ Voice server stopped${NC}"
 else
     echo -e "${YELLOW}  Service was not running${NC}"
 fi
 
-# Remove LaunchAgent plist
-echo -e "${YELLOW}▶ Removing LaunchAgent...${NC}"
-if [ -f "$PLIST_PATH" ]; then
-    rm "$PLIST_PATH"
-    echo -e "${GREEN}✓ LaunchAgent removed${NC}"
+# Disable the service
+echo -e "${YELLOW}▶ Disabling service...${NC}"
+if systemctl --user is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
+    systemctl --user disable "$SERVICE_NAME" 2>&1
+    echo -e "${GREEN}✓ Service disabled${NC}"
 else
-    echo -e "${YELLOW}  LaunchAgent file not found${NC}"
+    echo -e "${YELLOW}  Service was not enabled${NC}"
 fi
 
-# Kill any remaining processes
-if lsof -i :8888 > /dev/null 2>&1; then
+# Remove systemd service file
+echo -e "${YELLOW}▶ Removing systemd service file...${NC}"
+if [ -f "$SERVICE_PATH" ]; then
+    rm "$SERVICE_PATH"
+    systemctl --user daemon-reload
+    echo -e "${GREEN}✓ Service file removed${NC}"
+else
+    echo -e "${YELLOW}  Service file not found${NC}"
+fi
+
+# Kill any remaining processes on port 8888
+if ss -ltn | grep -q ':8888 ' 2>/dev/null; then
+    echo -e "${YELLOW}▶ Cleaning up port 8888...${NC}"
+    PID=$(ss -ltnp | grep ':8888 ' | grep -oP 'pid=\K[0-9]+' | head -1)
+    if [ -n "$PID" ]; then
+        kill -9 "$PID" 2>/dev/null
+        echo -e "${GREEN}✓ Port 8888 cleared${NC}"
+    fi
+elif lsof -i :8888 > /dev/null 2>&1; then
+    # Fallback to lsof
     echo -e "${YELLOW}▶ Cleaning up port 8888...${NC}"
     lsof -ti :8888 | xargs kill -9 2>/dev/null
     echo -e "${GREEN}✓ Port 8888 cleared${NC}"
@@ -63,9 +83,11 @@ echo
 read -p "Do you want to remove log files? (y/n): " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    if [ -f "$LOG_PATH" ]; then
-        rm "$LOG_PATH"
-        echo -e "${GREEN}✓ Log file removed${NC}"
+    if [ -d "$LOG_DIR" ]; then
+        rm -rf "$LOG_DIR"
+        echo -e "${GREEN}✓ Log directory removed${NC}"
+    else
+        echo -e "${YELLOW}  Log directory not found${NC}"
     fi
 fi
 

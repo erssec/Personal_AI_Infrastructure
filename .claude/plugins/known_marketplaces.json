@@ -1,0 +1,10 @@
+{
+  "claude-scientific-skills": {
+    "source": {
+      "source": "github",
+      "repo": "K-Dense-AI/claude-scientific-skills"
+    },
+    "installLocation": "/home/ehsan/.claude/plugins/marketplaces/claude-scientific-skills",
+    "lastUpdated": "2025-12-01T17:29:33.135Z"
+  }
+}

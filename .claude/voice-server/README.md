@@ -8,21 +8,39 @@ A voice notification server for the Personal AI Infrastructure (PAI) system that
 
 - **ElevenLabs Integration**: High-quality AI voices for notifications
 - **Multiple Voice Support**: Different voices for different AI agents
-- **macOS Service**: Runs automatically in the background
-- **Menu Bar Indicator**: Visual status indicator in macOS menu bar
+- **Linux Systemd Service**: Runs automatically in the background
+- **Desktop Notifications**: Native Linux desktop notifications
 - **Simple HTTP API**: Easy integration with any tool or script
 
 ## 📋 Prerequisites
 
-- macOS (tested on macOS 11+)
+- Ubuntu Linux (tested on Ubuntu 20.04+) or other systemd-based distributions
 - [Bun](https://bun.sh) runtime installed
 - ElevenLabs API key (required for voice functionality)
+- Audio player: `mpg123` or `ffmpeg` (for audio playback)
+- Notification support: `libnotify-bin` (for desktop notifications)
 
 ## 🚀 Quick Start
 
-### 1. Install Bun (if not already installed)
+### 1. Install Prerequisites
+
+**Install Bun** (if not already installed):
 ```bash
 curl -fsSL https://bun.sh/install | bash
+```
+
+**Install audio player** (choose one):
+```bash
+# Option 1: mpg123 (recommended, lightweight)
+sudo apt-get install mpg123
+
+# Option 2: ffmpeg (more features, larger)
+sudo apt-get install ffmpeg
+```
+
+**Install desktop notifications**:
+```bash
+sudo apt-get install libnotify-bin
 ```
 
 ### 2. Configure API Key (Required)
@@ -41,11 +59,10 @@ cd ${PAI_DIR}/voice-server
 ```
 
 This will:
-- Install dependencies
-- Create a macOS LaunchAgent for auto-start
+- Check for required dependencies (bun, audio player, notifications)
+- Create a systemd user service for auto-start
 - Start the voice server on port 8888
 - Verify the installation
-- Optionally install menu bar indicator (requires SwiftBar/BitBar)
 
 ## 🛠️ Service Management
 
@@ -53,14 +70,14 @@ This will:
 ```bash
 ./start.sh
 # or
-launchctl load ~/Library/LaunchAgents/com.pai.voice-server.plist
+systemctl --user start pai-voice-server
 ```
 
 ### Stop Server
 ```bash
 ./stop.sh
 # or
-launchctl unload ~/Library/LaunchAgents/com.pai.voice-server.plist
+systemctl --user stop pai-voice-server
 ```
 
 ### Restart Server
@@ -77,7 +94,16 @@ launchctl unload ~/Library/LaunchAgents/com.pai.voice-server.plist
 ```bash
 ./uninstall.sh
 ```
-This will stop the service and remove the LaunchAgent.
+This will stop the service and remove the systemd service file.
+
+### View Logs
+```bash
+# Using journalctl (systemd logs)
+journalctl --user -u pai-voice-server -f
+
+# Or view log files directly
+tail -f ~/.local/state/pai-voice-server/voice-server.log
+```
 
 ## 📡 API Usage
 
@@ -114,37 +140,31 @@ Artist:                  ZF6FPAbjXT4488VcRRnw  // Artist agent
 Writer:                  gfRt6Z3Z8aTbpLfexQ7N  // Content agent
 ```
 
-## 🖥️ Menu Bar Indicator
+## 🖥️ System Integration
 
-The voice server includes an optional menu bar indicator that shows the server status.
+The voice server integrates with your Linux desktop:
 
-### Installing the Menu Bar
+### Desktop Notifications
+Desktop notifications use `notify-send` from `libnotify-bin`. Notifications will appear in your system notification area (varies by desktop environment).
 
-1. **Install SwiftBar** (recommended) or BitBar:
+### Auto-Start on Login
+The systemd user service is enabled by default to start automatically when you log in:
 ```bash
-brew install --cask swiftbar
-# OR
-brew install --cask bitbar
+# Check if enabled
+systemctl --user is-enabled pai-voice-server
+
+# Disable auto-start
+systemctl --user disable pai-voice-server
+
+# Re-enable auto-start
+systemctl --user enable pai-voice-server
 ```
 
-2. **Run the menu bar installer**:
-```bash
-cd ${PAI_DIR}/voice-server/menubar
-./install-menubar.sh
-```
-
-### Menu Bar Features
-- **Visual Status**: 🎙️ (running) or 🎙️⚫ (stopped)
-- **Quick Controls**: Start/Stop/Restart server from menu
-- **Status Info**: Shows voice type (ElevenLabs)
-- **Quick Test**: Test voice with one click
-- **View Logs**: Access server logs directly
-
-### Manual Installation
-If you prefer manual installation:
-1. Copy `menubar/pai-voice.5s.sh` to your SwiftBar/BitBar plugins folder
-2. Make it executable: `chmod +x pai-voice.5s.sh`
-3. Refresh SwiftBar/BitBar
+### System Tray Integration (Optional)
+For system tray integration, you can create custom indicators using tools like:
+- **GNOME**: GNOME Shell extensions
+- **KDE**: Plasma widgets
+- **i3/sway**: i3status/waybar modules
 
 ## 🔧 Configuration
 
@@ -254,11 +274,17 @@ Response:
 ### Server won't start
 1. Check if another service is using port 8888:
    ```bash
+   ss -ltn | grep :8888
+   # or
    lsof -ti:8888
    ```
 2. Kill the process if needed:
    ```bash
    lsof -ti:8888 | xargs kill -9
+   ```
+3. Check systemd service status:
+   ```bash
+   systemctl --user status pai-voice-server
    ```
 
 ### No voice output
@@ -268,7 +294,9 @@ Response:
    ```
 2. Check server logs:
    ```bash
-   tail -f ${PAI_DIR}/voice-server/logs/voice-server.log
+   journalctl --user -u pai-voice-server -n 50
+   # or
+   tail -f ~/.local/state/pai-voice-server/voice-server.log
    ```
 3. Test the API directly:
    ```bash
@@ -286,22 +314,24 @@ Response:
 
 ```
 voice-server/
-├── server.ts              # Main server implementation
-├── voices.json            # Voice metadata and configuration
-├── install.sh             # Installation script
-├── start.sh               # Start service
-├── stop.sh                # Stop service
-├── restart.sh             # Restart service
-├── status.sh              # Check service status
-├── uninstall.sh           # Uninstall service
-├── run-server.sh          # Direct server runner
-├── logs/                  # Server logs
-│   ├── voice-server.log
-│   └── voice-server-error.log
-├── macos-service/         # LaunchAgent configuration
-│   └── com.paivoice.server.plist
-└── menubar/               # Menu bar indicator scripts
-    └── pai-voice.5s.sh
+├── server.ts                      # Main server implementation
+├── voices.json                    # Voice metadata and configuration
+├── pai-voice-server.service       # Systemd service file
+├── install.sh                     # Installation script
+├── start.sh                       # Start service
+├── stop.sh                        # Stop service
+├── restart.sh                     # Restart service
+├── status.sh                      # Check service status
+├── uninstall.sh                   # Uninstall service
+├── run-server.sh                  # Direct server runner
+└── ~/.local/state/pai-voice-server/  # Log files
+    ├── voice-server.log
+    └── voice-server-error.log
+```
+
+Systemd service installed at:
+```
+~/.config/systemd/user/pai-voice-server.service
 ```
 
 ## 🔒 Security

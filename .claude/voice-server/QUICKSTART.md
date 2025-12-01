@@ -1,19 +1,34 @@
 # PAI Voice Server - Quick Start Guide
 
-Get voice notifications working in 5 minutes with ElevenLabs TTS.
+Get voice notifications working in 5 minutes with ElevenLabs TTS on Ubuntu Linux.
 
 ## Prerequisites
 
-- macOS (tested on macOS 11+)
+- Ubuntu Linux 20.04+ (or other systemd-based distribution)
 - [Bun](https://bun.sh) runtime
+- Audio player: mpg123 or ffmpeg
+- Desktop notifications: libnotify-bin
 - ElevenLabs account (free tier available)
 
-## Step 1: Install Bun
+## Step 1: Install Dependencies
 
-If you don't have Bun installed:
-
+**Install Bun:**
 ```bash
 curl -fsSL https://bun.sh/install | bash
+```
+
+**Install audio player (choose one):**
+```bash
+# Option 1: mpg123 (recommended, lightweight)
+sudo apt-get install mpg123
+
+# Option 2: ffmpeg (more features)
+sudo apt-get install ffmpeg
+```
+
+**Install desktop notifications:**
+```bash
+sudo apt-get install libnotify-bin
 ```
 
 ## Step 2: Get Your ElevenLabs API Key
@@ -47,8 +62,8 @@ cd ${PAI_DIR}/voice-server
 ```
 
 This will:
-- Install dependencies
-- Create a macOS LaunchAgent for auto-start
+- Check for required dependencies
+- Create a systemd user service for auto-start
 - Start the voice server on port 8888
 - Verify the installation works
 
@@ -62,7 +77,7 @@ curl -X POST http://localhost:8888/notify \
   -d '{"message": "Voice system is working perfectly!"}'
 ```
 
-You should hear the message spoken aloud!
+You should hear the message spoken aloud and see a desktop notification!
 
 ## What's Next?
 
@@ -91,18 +106,21 @@ The PAI system supports different voices for different agents:
 
 These voice IDs are configured in your hooks and agent files.
 
-### Install Menu Bar Indicator (Optional)
+### Desktop Integration (Optional)
 
-Get visual status in your macOS menu bar:
+The voice server integrates with your Linux desktop:
 
+**Auto-start on login** (enabled by default):
 ```bash
-# Install SwiftBar (recommended)
-brew install --cask swiftbar
+# Check if enabled
+systemctl --user is-enabled pai-voice-server
 
-# Install the menu bar indicator
-cd ${PAI_DIR}/voice-server/menubar
-./install-menubar.sh
+# Disable/enable auto-start
+systemctl --user disable pai-voice-server
+systemctl --user enable pai-voice-server
 ```
+
+**Desktop notifications** appear in your system notification area (varies by desktop environment: GNOME, KDE, i3, etc.)
 
 ## Troubleshooting
 
@@ -131,14 +149,24 @@ Expected output:
 
 **Check 3:** Look at server logs:
 ```bash
-tail -f ${PAI_DIR}/voice-server/logs/voice-server.log
+# Using journalctl (systemd logs)
+journalctl --user -u pai-voice-server -n 50
+
+# Or view log files directly
+tail -f ~/.local/state/pai-voice-server/voice-server.log
 ```
 
 ### "Port 8888 already in use"
 
-Kill any existing process and restart:
+Check what's using the port and restart:
 ```bash
+# Check port usage
+ss -ltn | grep :8888
+
+# Kill process if needed
 lsof -ti:8888 | xargs kill -9
+
+# Restart server
 cd ${PAI_DIR}/voice-server && ./restart.sh
 ```
 
@@ -155,17 +183,24 @@ Once installed, the voice server runs automatically. You can control it with:
 ```bash
 # Check status
 ./status.sh
+# or: systemctl --user status pai-voice-server
 
 # Stop server
 ./stop.sh
+# or: systemctl --user stop pai-voice-server
 
 # Start server
 ./start.sh
+# or: systemctl --user start pai-voice-server
 
 # Restart server
 ./restart.sh
+# or: systemctl --user restart pai-voice-server
 
-# Uninstall (removes LaunchAgent)
+# View logs
+journalctl --user -u pai-voice-server -f
+
+# Uninstall (removes systemd service)
 ./uninstall.sh
 ```
 
@@ -214,8 +249,9 @@ curl -X POST http://localhost:8888/notify \
 ## Need Help?
 
 1. Check the [README](README.md) for detailed troubleshooting
-2. Review server logs: `tail -f ${PAI_DIR}/voice-server/logs/voice-server.log`
+2. Review server logs: `journalctl --user -u pai-voice-server -n 50`
 3. Test the health endpoint: `curl http://localhost:8888/health`
+4. Check service status: `systemctl --user status pai-voice-server`
 
 ---
 

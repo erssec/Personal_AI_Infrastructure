@@ -103,7 +103,7 @@ async function generateSpeech(text: string, voiceId: string): Promise<ArrayBuffe
   return await response.arrayBuffer();
 }
 
-// Play audio using afplay (macOS)
+// Play audio using mpg123 (Linux)
 async function playAudio(audioBuffer: ArrayBuffer): Promise<void> {
   const tempFile = `/tmp/voice-${Date.now()}.mp3`;
 
@@ -111,23 +111,46 @@ async function playAudio(audioBuffer: ArrayBuffer): Promise<void> {
   await Bun.write(tempFile, audioBuffer);
 
   return new Promise((resolve, reject) => {
-    const proc = spawn('/usr/bin/afplay', [tempFile]);
+    // Try mpg123 first, fall back to ffplay if not available
+    const audioPlayers = [
+      { cmd: '/usr/bin/mpg123', args: ['-q', tempFile] },
+      { cmd: 'mpg123', args: ['-q', tempFile] },
+      { cmd: '/usr/bin/ffplay', args: ['-nodisp', '-autoexit', '-v', 'quiet', tempFile] },
+      { cmd: 'ffplay', args: ['-nodisp', '-autoexit', '-v', 'quiet', tempFile] }
+    ];
 
-    proc.on('error', (error) => {
-      console.error('Error playing audio:', error);
-      reject(error);
-    });
+    let lastError: Error | null = null;
 
-    proc.on('exit', (code) => {
-      // Clean up temp file
-      spawn('/bin/rm', [tempFile]);
-
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`afplay exited with code ${code}`));
+    const tryNextPlayer = (index: number) => {
+      if (index >= audioPlayers.length) {
+        // Clean up temp file
+        spawn('/bin/rm', [tempFile]);
+        reject(lastError || new Error('No audio player found. Install mpg123 or ffmpeg'));
+        return;
       }
-    });
+
+      const player = audioPlayers[index];
+      const proc = spawn(player.cmd, player.args);
+
+      proc.on('error', (error) => {
+        lastError = error;
+        tryNextPlayer(index + 1);
+      });
+
+      proc.on('exit', (code) => {
+        // Clean up temp file
+        spawn('/bin/rm', [tempFile]);
+
+        if (code === 0) {
+          resolve();
+        } else {
+          lastError = new Error(`${player.cmd} exited with code ${code}`);
+          tryNextPlayer(index + 1);
+        }
+      });
+    };
+
+    tryNextPlayer(0);
   });
 }
 
@@ -151,7 +174,7 @@ function spawnSafe(command: string, args: string[]): Promise<void> {
   });
 }
 
-// Send macOS notification with voice
+// Send Linux notification with voice
 async function sendNotification(
   title: string,
   message: string,
@@ -187,10 +210,20 @@ async function sendNotification(
     }
   }
 
-  // Display macOS notification
+  // Display Linux desktop notification using notify-send
   try {
-    const script = `display notification "${safeMessage}" with title "${safeTitle}" sound name ""`;
-    await spawnSafe('/usr/bin/osascript', ['-e', script]);
+    // Try different notify-send locations
+    const notifyCmds = ['/usr/bin/notify-send', 'notify-send'];
+
+    for (const cmd of notifyCmds) {
+      try {
+        await spawnSafe(cmd, ['-u', 'normal', '-t', '5000', safeTitle, safeMessage]);
+        break; // Success, no need to try other commands
+      } catch (error) {
+        // Try next command
+        continue;
+      }
+    }
   } catch (error) {
     console.error("Notification display error:", error);
   }

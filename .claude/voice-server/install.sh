@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # PAI Voice Server Installation Script
-# This script installs the voice server as a macOS service
+# This script installs the voice server as a Linux systemd user service
 
 set -e
 
@@ -14,13 +14,15 @@ NC='\033[0m' # No Color
 
 # Configuration
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-SERVICE_NAME="com.pai.voice-server"
-PLIST_PATH="$HOME/Library/LaunchAgents/${SERVICE_NAME}.plist"
-LOG_PATH="$HOME/Library/Logs/pai-voice-server.log"
+SERVICE_NAME="pai-voice-server"
+SERVICE_FILE="${SERVICE_NAME}.service"
+SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
+SERVICE_PATH="${SYSTEMD_USER_DIR}/${SERVICE_FILE}"
+LOG_DIR="$HOME/.local/state/pai-voice-server"
 ENV_FILE="$HOME/.env"
 
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}     PAI Voice Server Installation${NC}"
+echo -e "${BLUE}     PAI Voice Server Installation (Ubuntu Linux)${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo
 
@@ -34,14 +36,50 @@ if ! command -v bun &> /dev/null; then
 fi
 echo -e "${GREEN}✓ Bun is installed${NC}"
 
+# Check for audio player (mpg123 or ffmpeg)
+AUDIO_PLAYER_INSTALLED=false
+if command -v mpg123 &> /dev/null; then
+    echo -e "${GREEN}✓ mpg123 is installed${NC}"
+    AUDIO_PLAYER_INSTALLED=true
+elif command -v ffplay &> /dev/null; then
+    echo -e "${GREEN}✓ ffplay (ffmpeg) is installed${NC}"
+    AUDIO_PLAYER_INSTALLED=true
+else
+    echo -e "${YELLOW}⚠ No audio player found (mpg123 or ffmpeg)${NC}"
+    echo "  Install one of these for audio playback:"
+    echo "  sudo apt-get install mpg123"
+    echo "  or"
+    echo "  sudo apt-get install ffmpeg"
+    read -p "Continue without audio player? (y/n): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+fi
+
+# Check for notify-send (libnotify)
+if command -v notify-send &> /dev/null; then
+    echo -e "${GREEN}✓ notify-send is installed${NC}"
+else
+    echo -e "${YELLOW}⚠ notify-send not found${NC}"
+    echo "  Install libnotify-bin for desktop notifications:"
+    echo "  sudo apt-get install libnotify-bin"
+    read -p "Continue without notifications? (y/n): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+fi
+
 # Check for existing installation
-if launchctl list | grep -q "$SERVICE_NAME" 2>/dev/null; then
-    echo -e "${YELLOW}⚠ Voice server is already installed${NC}"
+if systemctl --user is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+    echo -e "${YELLOW}⚠ Voice server is already installed and running${NC}"
     read -p "Do you want to reinstall? (y/n): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo -e "${YELLOW}▶ Stopping existing service...${NC}"
-        launchctl unload "$PLIST_PATH" 2>/dev/null || true
+        systemctl --user stop "$SERVICE_NAME" 2>/dev/null || true
+        systemctl --user disable "$SERVICE_NAME" 2>/dev/null || true
         echo -e "${GREEN}✓ Existing service stopped${NC}"
     else
         echo "Installation cancelled"
@@ -58,12 +96,10 @@ if [ -f "$ENV_FILE" ] && grep -q "ELEVENLABS_API_KEY=" "$ENV_FILE"; then
         ELEVENLABS_CONFIGURED=true
     else
         echo -e "${YELLOW}⚠ ElevenLabs API key not configured${NC}"
-        echo "  Voice server will use macOS 'say' command as fallback"
         ELEVENLABS_CONFIGURED=false
     fi
 else
     echo -e "${YELLOW}⚠ No ElevenLabs configuration found${NC}"
-    echo "  Voice server will use macOS 'say' command as fallback"
     ELEVENLABS_CONFIGURED=false
 fi
 
@@ -75,72 +111,41 @@ if [ "$ELEVENLABS_CONFIGURED" = false ]; then
     echo
 fi
 
-# Create LaunchAgent plist
-echo -e "${YELLOW}▶ Creating LaunchAgent configuration...${NC}"
-mkdir -p "$HOME/Library/LaunchAgents"
+# Create systemd user directory if it doesn't exist
+echo -e "${YELLOW}▶ Creating systemd user service...${NC}"
+mkdir -p "$SYSTEMD_USER_DIR"
+mkdir -p "$LOG_DIR"
 
-cat > "$PLIST_PATH" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>${SERVICE_NAME}</string>
-    
-    <key>ProgramArguments</key>
-    <array>
-        <string>$(which bun)</string>
-        <string>run</string>
-        <string>${SCRIPT_DIR}/server.ts</string>
-    </array>
-    
-    <key>WorkingDirectory</key>
-    <string>${SCRIPT_DIR}</string>
-    
-    <key>RunAtLoad</key>
-    <true/>
-    
-    <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-    </dict>
-    
-    <key>StandardOutPath</key>
-    <string>${LOG_PATH}</string>
-    
-    <key>StandardErrorPath</key>
-    <string>${LOG_PATH}</string>
-    
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>HOME</key>
-        <string>${HOME}</string>
-        <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${HOME}/.bun/bin</string>
-    </dict>
-</dict>
-</plist>
-EOF
+# Copy service file and replace placeholders
+sed "s|%h|$HOME|g" "$SCRIPT_DIR/$SERVICE_FILE" > "$SERVICE_PATH"
 
-echo -e "${GREEN}✓ LaunchAgent configuration created${NC}"
+echo -e "${GREEN}✓ Systemd service file created${NC}"
 
-# Load the LaunchAgent
+# Reload systemd daemon
+systemctl --user daemon-reload
+
+# Enable the service to start at login
+echo -e "${YELLOW}▶ Enabling voice server service...${NC}"
+systemctl --user enable "$SERVICE_NAME"
+echo -e "${GREEN}✓ Service enabled (will start at login)${NC}"
+
+# Start the service
 echo -e "${YELLOW}▶ Starting voice server service...${NC}"
-launchctl load "$PLIST_PATH" 2>/dev/null || {
-    echo -e "${RED}✗ Failed to load LaunchAgent${NC}"
-    echo "  Try manually: launchctl load $PLIST_PATH"
+systemctl --user start "$SERVICE_NAME" 2>&1 || {
+    echo -e "${RED}✗ Failed to start service${NC}"
+    echo "  Check status: systemctl --user status $SERVICE_NAME"
+    echo "  Check logs: journalctl --user -u $SERVICE_NAME"
     exit 1
 }
 
 # Wait for server to start
-sleep 2
+sleep 3
 
 # Test the server
 echo -e "${YELLOW}▶ Testing voice server...${NC}"
 if curl -s -f -X GET http://localhost:8888/health > /dev/null 2>&1; then
     echo -e "${GREEN}✓ Voice server is running${NC}"
-    
+
     # Send test notification
     echo -e "${YELLOW}▶ Sending test notification...${NC}"
     curl -s -X POST http://localhost:8888/notify \
@@ -149,7 +154,7 @@ if curl -s -f -X GET http://localhost:8888/health > /dev/null 2>&1; then
     echo -e "${GREEN}✓ Test notification sent${NC}"
 else
     echo -e "${RED}✗ Voice server is not responding${NC}"
-    echo "  Check logs at: $LOG_PATH"
+    echo "  Check logs: journalctl --user -u $SERVICE_NAME -n 50"
     echo "  Try running manually: bun run $SCRIPT_DIR/server.ts"
     exit 1
 fi
@@ -164,20 +169,22 @@ echo -e "${BLUE}Service Information:${NC}"
 echo "  • Service: $SERVICE_NAME"
 echo "  • Status: Running"
 echo "  • Port: 8888"
-echo "  • Logs: $LOG_PATH"
+echo "  • Logs: $LOG_DIR/"
+echo "  • System logs: journalctl --user -u $SERVICE_NAME"
 
 if [ "$ELEVENLABS_CONFIGURED" = true ]; then
     echo "  • Voice: ElevenLabs AI"
 else
-    echo "  • Voice: macOS Say (fallback)"
+    echo "  • Voice: Not configured (audio only)"
 fi
 
 echo
 echo -e "${BLUE}Management Commands:${NC}"
-echo "  • Status:   ./status.sh"
-echo "  • Stop:     ./stop.sh"
-echo "  • Start:    ./start.sh"
-echo "  • Restart:  ./restart.sh"
+echo "  • Status:   ./status.sh  or  systemctl --user status $SERVICE_NAME"
+echo "  • Stop:     ./stop.sh    or  systemctl --user stop $SERVICE_NAME"
+echo "  • Start:    ./start.sh   or  systemctl --user start $SERVICE_NAME"
+echo "  • Restart:  ./restart.sh or  systemctl --user restart $SERVICE_NAME"
+echo "  • Logs:     journalctl --user -u $SERVICE_NAME -f"
 echo "  • Uninstall: ./uninstall.sh"
 
 echo
@@ -188,19 +195,4 @@ echo "    -d '{\"message\": \"Hello from PAI\"}'"
 
 echo
 echo -e "${GREEN}The voice server will now start automatically when you log in.${NC}"
-
-# Ask about menu bar indicator
 echo
-read -p "Would you like to install a menu bar indicator? (y/n): " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    echo -e "${YELLOW}▶ Installing menu bar indicator...${NC}"
-    if [ -f "$SCRIPT_DIR/menubar/install-menubar.sh" ]; then
-        chmod +x "$SCRIPT_DIR/menubar/install-menubar.sh"
-        "$SCRIPT_DIR/menubar/install-menubar.sh"
-    else
-        echo -e "${YELLOW}⚠ Menu bar installer not found${NC}"
-        echo "  You can install it manually later from:"
-        echo "  $SCRIPT_DIR/menubar/install-menubar.sh"
-    fi
-fi
