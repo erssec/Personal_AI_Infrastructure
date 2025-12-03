@@ -227,12 +227,14 @@ async function sendNotification(
       // Convert audio buffer to base64 for web clients
       audioBase64 = Buffer.from(audioBuffer).toString('base64');
 
-      // Play audio locally (will fail silently in WSL)
-      try {
-        await playAudio(audioBuffer);
-      } catch (error) {
-        console.log("Local audio playback not available (expected in WSL)");
-      }
+      // Server-side audio playback disabled to prevent duplicate playback
+      // (audio is played in the web client via autoplay)
+      // Uncomment below if you want local server-side playback:
+      // try {
+      //   await playAudio(audioBuffer);
+      // } catch (error) {
+      //   console.log("Local audio playback not available (expected in WSL)");
+      // }
     } catch (error) {
       console.error("Failed to generate/play speech:", error);
     }
