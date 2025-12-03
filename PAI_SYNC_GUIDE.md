@@ -91,7 +91,7 @@ bun .claude/hooks/self-test.ts
 
 Expected output:
 ```
-✅ PAI_DIR Resolution: /Users/yourname/Projects/PAI/.claude
+✅ PAI_DIR Resolution: /home/ehsan/Projects/PAI/.claude
 ✅ Hooks Directory: Found
 ✅ CORE Skill: loads correctly
 ...

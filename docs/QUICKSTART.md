@@ -50,7 +50,7 @@ Edit `.claude/settings.json` and set `PAI_DIR` to your actual path:
 
 ```json
 "env": {
-  "PAI_DIR": "/Users/yourname/.claude",  // <- Change this!
+  "PAI_DIR": "/home/ehsan/.claude",  // <- Change this!
   ...
 }
 ```
@@ -206,7 +206,7 @@ read ${PAI_DIR}/skills/CORE/SKILL.md
 Hooks require Bun to be installed and in your PATH. Verify:
 ```bash
 which bun
-# Should show path like /Users/yourname/.bun/bin/bun
+# Should show path like /home/ehsan/.bun/bin/bun
 ```
 
 If Bun isn't found, reinstall it and restart your terminal.
