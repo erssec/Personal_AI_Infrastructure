@@ -1,13 +1,30 @@
 #!/usr/bin/env bun
 /**
  * PAIVoice - Personal AI Voice notification server using ElevenLabs TTS
+ * Now with WebSocket support for browser-based notifications
  */
 
-import { serve } from "bun";
+import { serve, type ServerWebSocket } from "bun";
 import { spawn } from "child_process";
 import { homedir } from "os";
 import { join } from "path";
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
+
+// WebSocket connections
+const wsClients = new Set<ServerWebSocket<unknown>>();
+
+// Broadcast notification to all connected WebSocket clients
+function broadcastNotification(data: any) {
+  const message = JSON.stringify(data);
+  for (const ws of wsClients) {
+    try {
+      ws.send(message);
+    } catch (error) {
+      console.error("Error sending to WebSocket client:", error);
+      wsClients.delete(ws);
+    }
+  }
+}
 
 // Load .env from user home directory
 const envPath = join(homedir(), '.env');
@@ -174,7 +191,7 @@ function spawnSafe(command: string, args: string[]): Promise<void> {
   });
 }
 
-// Send Linux notification with voice
+// Send Linux notification with voice and broadcast to web clients
 async function sendNotification(
   title: string,
   message: string,
@@ -197,6 +214,8 @@ async function sendNotification(
   const safeTitle = sanitizeForShell(title);
   const safeMessage = sanitizeForShell(message);
 
+  let audioBase64: string | null = null;
+
   // Generate and play voice using ElevenLabs
   if (voiceEnabled && ELEVENLABS_API_KEY) {
     try {
@@ -204,13 +223,33 @@ async function sendNotification(
       console.log(`🎙️  Generating speech with ElevenLabs (voice: ${voice})`);
 
       const audioBuffer = await generateSpeech(safeMessage, voice);
-      await playAudio(audioBuffer);
+
+      // Convert audio buffer to base64 for web clients
+      audioBase64 = Buffer.from(audioBuffer).toString('base64');
+
+      // Play audio locally (will fail silently in WSL)
+      try {
+        await playAudio(audioBuffer);
+      } catch (error) {
+        console.log("Local audio playback not available (expected in WSL)");
+      }
     } catch (error) {
       console.error("Failed to generate/play speech:", error);
     }
   }
 
-  // Display Linux desktop notification using notify-send
+  // Broadcast to all WebSocket clients
+  broadcastNotification({
+    type: 'notification',
+    title: safeTitle,
+    message: safeMessage,
+    voiceEnabled,
+    voiceId: voiceId || DEFAULT_VOICE_ID,
+    audio: audioBase64,
+    timestamp: Date.now()
+  });
+
+  // Display Linux desktop notification using notify-send (will fail in WSL)
   try {
     // Try different notify-send locations
     const notifyCmds = ['/usr/bin/notify-send', 'notify-send'];
@@ -225,7 +264,7 @@ async function sendNotification(
       }
     }
   } catch (error) {
-    console.error("Notification display error:", error);
+    // Silently fail in WSL - web interface will handle notifications
   }
 }
 
@@ -251,16 +290,54 @@ function checkRateLimit(ip: string): boolean {
   return true;
 }
 
-// Start HTTP server
+// Start HTTP server with WebSocket support
 const server = serve({
   port: PORT,
-  async fetch(req) {
+  async fetch(req, server) {
     const url = new URL(req.url);
+
+    // WebSocket upgrade
+    if (url.pathname === "/ws") {
+      const upgraded = server.upgrade(req);
+      if (!upgraded) {
+        return new Response("WebSocket upgrade failed", { status: 500 });
+      }
+      return undefined;
+    }
+
+    // Serve static files
+    if (url.pathname === "/" || url.pathname === "/index.html") {
+      const htmlPath = join(__dirname, "public", "index.html");
+      if (existsSync(htmlPath)) {
+        const html = readFileSync(htmlPath, "utf-8");
+        return new Response(html, {
+          headers: { "Content-Type": "text/html" },
+          status: 200
+        });
+      } else {
+        // Return a simple HTML page if file doesn't exist yet
+        return new Response(`
+<!DOCTYPE html>
+<html>
+<head>
+  <title>PAI Voice Server</title>
+</head>
+<body>
+  <h1>PAI Voice Server</h1>
+  <p>Web interface not yet installed. Please create public/index.html</p>
+</body>
+</html>
+        `, {
+          headers: { "Content-Type": "text/html" },
+          status: 200
+        });
+      }
+    }
 
     const clientIp = req.headers.get('x-forwarded-for') || 'localhost';
 
     const corsHeaders = {
-      "Access-Control-Allow-Origin": "http://localhost",
+      "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type"
     };
@@ -365,10 +442,36 @@ const server = serve({
       status: 200
     });
   },
+  websocket: {
+    open(ws) {
+      wsClients.add(ws);
+      console.log(`🔌 WebSocket client connected (${wsClients.size} total)`);
+
+      // Send welcome message
+      ws.send(JSON.stringify({
+        type: 'welcome',
+        message: 'Connected to PAI Voice Server',
+        timestamp: Date.now()
+      }));
+    },
+    message(ws, message) {
+      console.log(`📨 WebSocket message:`, message);
+    },
+    close(ws) {
+      wsClients.delete(ws);
+      console.log(`🔌 WebSocket client disconnected (${wsClients.size} remaining)`);
+    },
+    error(ws, error) {
+      console.error("WebSocket error:", error);
+      wsClients.delete(ws);
+    }
+  }
 });
 
 console.log(`🚀 PAIVoice Server running on port ${PORT}`);
 console.log(`🎙️  Using ElevenLabs TTS (model: ${DEFAULT_MODEL}, voice: ${DEFAULT_VOICE_ID})`);
 console.log(`📡 POST to http://localhost:${PORT}/notify`);
-console.log(`🔒 Security: CORS restricted to localhost, rate limiting enabled`);
+console.log(`🌐 Web interface: http://localhost:${PORT}/`);
+console.log(`🔌 WebSocket: ws://localhost:${PORT}/ws`);
+console.log(`🔒 Security: CORS enabled, rate limiting active`);
 console.log(`🔑 API Key: ${ELEVENLABS_API_KEY ? '✅ Configured' : '❌ Missing'}`);
