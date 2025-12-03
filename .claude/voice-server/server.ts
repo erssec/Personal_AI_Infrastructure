@@ -251,23 +251,23 @@ async function sendNotification(
     timestamp: Date.now()
   });
 
-  // Display Linux desktop notification using notify-send (will fail in WSL)
-  try {
-    // Try different notify-send locations
-    const notifyCmds = ['/usr/bin/notify-send', 'notify-send'];
+  // Display Linux desktop notification using notify-send (DISABLED - using browser notifications instead)
+  // try {
+  //   // Try different notify-send locations
+  //   const notifyCmds = ['/usr/bin/notify-send', 'notify-send'];
 
-    for (const cmd of notifyCmds) {
-      try {
-        await spawnSafe(cmd, ['-u', 'normal', '-t', '5000', safeTitle, safeMessage]);
-        break; // Success, no need to try other commands
-      } catch (error) {
-        // Try next command
-        continue;
-      }
-    }
-  } catch (error) {
-    // Silently fail in WSL - web interface will handle notifications
-  }
+  //   for (const cmd of notifyCmds) {
+  //     try {
+  //       await spawnSafe(cmd, ['-u', 'normal', '-t', '5000', safeTitle, safeMessage]);
+  //       break; // Success, no need to try other commands
+  //     } catch (error) {
+  //       // Try next command
+  //       continue;
+  //     }
+  //   }
+  // } catch (error) {
+  //   // Silently fail in WSL - web interface will handle notifications
+  // }
 }
 
 // Rate limiting
