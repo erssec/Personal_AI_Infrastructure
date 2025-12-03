@@ -470,8 +470,12 @@
       const time = new Date(data.timestamp).toLocaleTimeString();
 
       let audioButton = '';
+      let audioWarning = '';
+
       if (data.audio) {
         audioButton = `<button class="play-audio" onclick="playAudio('${data.audio}')" title="Play voice message">▶️</button>`;
+      } else if (data.voiceEnabled && !data.audio) {
+        audioWarning = `<span style="color: #ff6b6b; font-size: 0.85em;">⚠️ No audio (API key missing?)</span>`;
       }
 
       notificationEl.innerHTML = `
@@ -483,6 +487,7 @@
         <div class="notification-footer">
           ${data.voiceEnabled ? '<span class="voice-badge">🎙️ Voice Enabled</span>' : ''}
           ${audioButton}
+          ${audioWarning}
         </div>
       `;
 
@@ -607,10 +612,27 @@
       document.getElementById('voice-notifications').textContent = '0';
     }
 
+    // Check API key configuration on load
+    async function checkApiKey() {
+      try {
+        const response = await fetch('/health');
+        const data = await response.json();
+
+        if (!data.api_key_configured) {
+          showError('⚠️ ElevenLabs API key not configured. Voice notifications will not have audio. Please configure ELEVENLABS_API_KEY in ~/.env and restart the server.');
+        }
+      } catch (error) {
+        console.error('Error checking API key:', error);
+      }
+    }
+
     // Request notification permission
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
     }
+
+    // Check API configuration
+    checkApiKey();
 
     // Connect to WebSocket
     connectWebSocket();
